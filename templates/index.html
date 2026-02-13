@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forked – Butterfly Effect: Trade-off Simulator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Animated star background -->
+    <div class="stars"></div>
+    <div class="stars2"></div>
+    <div class="stars3"></div>
+
+    <!-- Page wrapper for perfect centering -->
+    <div class="page-wrapper">
+        <!-- Main container -->
+        <div class="container">
+            <!-- HOMEPAGE VIEW -->
+            <div id="homepage" class="view active">
+                <div class="hero-container">
+                    <div class="hero-section">
+                        <h1 class="hero-title">What If…?</h1>
+                        <p class="hero-subtitle">Explore the life you romanticized.</p>
+                        <p class="hero-subtext">
+                            Every decision creates opportunity.<br>
+                            Every opportunity creates sacrifice.
+                        </p>
+                    </div>
+
+                    <!-- Glassmorphic form card -->
+                    <div class="glass-card form-card">
+                        <form id="simulatorForm">
+                        <div class="form-group">
+                            <label for="age">Your Age</label>
+                            <input type="number" id="age" name="age" min="18" max="100" required placeholder="Enter your age">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="profession">Current Profession</label>
+                            <input type="text" id="profession" name="profession" placeholder="e.g., Software Engineer">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="location">Location</label>
+                            <input type="text" id="location" name="location" placeholder="e.g., San Francisco, CA">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="risk">Risk Tolerance</label>
+                            <select id="risk" name="risk">
+                                <option value="Low">Low - Prefer stability</option>
+                                <option value="Medium" selected>Medium - Balanced approach</option>
+                                <option value="High">High - Ready to take chances</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="decision">The Decision You're Considering</label>
+                            <textarea id="decision" name="decision" rows="5" required placeholder="Describe the life decision you'd like to explore. What are you romanticizing?"></textarea>
+                        </div>
+
+                        <button type="submit" class="btn-simulate">Simulate Parallel Timeline</button>
+                    </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESULTS VIEW -->
+            <div id="resultsView" class="view">
+            <button id="backBtn" class="btn-back">← Back to Simulator</button>
+
+            <div class="results-container fade-in">
+                <!-- Comparison Layout -->
+                <div class="comparison-layout">
+                    <!-- Current Path -->
+                    <div class="path-card current-path">
+                        <div class="path-header">
+                            <span class="path-icon">🟢</span>
+                            <h2>Your Current Path</h2>
+                        </div>
+                        <div class="path-content" id="currentPathContent"></div>
+                    </div>
+
+                    <!-- Alternate Reality -->
+                    <div class="path-card alternate-reality">
+                        <div class="path-header">
+                            <span class="path-icon">🔵</span>
+                            <h2>Alternate Reality</h2>
+                        </div>
+                        
+                        <!-- Timeline -->
+                        <div class="timeline" id="timelineContainer">
+                            <!-- Timeline cards will be inserted here -->
+                        </div>
+
+                        <!-- Hidden Costs -->
+                        <div class="hidden-costs" id="hiddenCostsSection">
+                            <div class="costs-header">
+                                <span class="costs-icon">⚖</span>
+                                <h3>Hidden Costs</h3>
+                            </div>
+                            <ul class="costs-list" id="costsList"></ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Romanticization Meter -->
+                <div class="meter-section">
+                    <div class="meter-card">
+                        <div class="meter-content">
+                            <div class="meter-circle-container">
+                                <svg class="meter-circle" viewBox="0 0 200 200">
+                                    <defs>
+                                        <linearGradient id="meterGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                            <stop offset="0%" style="stop-color:#00d9ff;stop-opacity:1" />
+                                            <stop offset="100%" style="stop-color:#b000d9;stop-opacity:1" />
+                                        </linearGradient>
+                                    </defs>
+                                    <circle class="meter-bg" cx="100" cy="100" r="90"></circle>
+                                    <circle class="meter-progress" cx="100" cy="100" r="90" id="progressRing"></circle>
+                                </svg>
+                                <div class="meter-value" id="meterValue">0</div>
+                            </div>
+                            <div class="meter-label">Romanticization Index</div>
+                            <div class="meter-sublabel">Perceived Regret Probability</div>
+                            <div class="meter-insight" id="meterInsight"></div>
+                        </div>
+                    </div>
+
+                    <!-- Emotional Insight -->
+                    <div class="emotional-card">
+                        <div class="insight-header">
+                            <span class="insight-icon">🧠</span>
+                            <h3>Emotional Stability Index</h3>
+                        </div>
+                        <p class="insight-text" id="insightText"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading spinner -->
+    <div id="loadingSpinner" class="loading-spinner hidden">
+        <div class="spinner"></div>
+        <p>Simulating your parallel timeline...</p>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
