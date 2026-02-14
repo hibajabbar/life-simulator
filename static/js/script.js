@@ -37,7 +37,6 @@ backBtn.addEventListener('click', goBackToForm);
 async function handleFormSubmit(e) {
     e.preventDefault();
 
-    // Collect form data
     formData = {
         age: document.getElementById('age').value,
         profession: document.getElementById('profession').value,
@@ -46,57 +45,35 @@ async function handleFormSubmit(e) {
         decision: document.getElementById('decision').value
     };
 
-    console.log('[DEBUG] Form data collected:', formData);
-
-    // Validate client-side
     if (!formData.age || !formData.decision) {
         alert('Please fill in your age and the decision you are considering.');
         return;
     }
 
-    // Disable button and show spinner
     submitBtn.disabled = true;
     loadingSpinner.classList.remove('hidden');
-    console.log('[DEBUG] Loading spinner shown, button disabled');
 
     try {
-        // Send POST request to backend
-        console.log('[DEBUG] Sending request to /generate...');
         const response = await fetch('/generate', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(formData)
         });
 
-        console.log('[DEBUG] Response status:', response.status);
-        console.log('[DEBUG] Response ok:', response.ok);
-
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('[ERROR] Server error response:', response.status, errorText);
-            throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            throw new Error("Server error");
         }
 
         const data = await response.json();
-        console.log('[DEBUG] Response data received:', data);
-        
+
         if (data.error) {
-            console.error('[ERROR] API error:', data.error);
             throw new Error(data.error);
         }
 
-        const rawOutput = data.raw_output;
-        console.log('[DEBUG] Raw output length:', rawOutput ? rawOutput.length : 0);
-
-        // Parse and render results
-        console.log('[DEBUG] Calling renderResults...');
-        renderResults(rawOutput);
+        renderResults(data.raw_output);
 
     } catch (error) {
-        console.error('[EXCEPTION] Error:', error);
-        console.error('[EXCEPTION] Error message:', error.message);
+        console.error(error);
         alert('Failed to generate timeline. Please try again.');
         submitBtn.disabled = false;
     } finally {
@@ -105,32 +82,30 @@ async function handleFormSubmit(e) {
 }
 
 // ========================================
-// PARSE STRUCTURED OUTPUT
+// PARSE STRUCTURED OUTPUT (ROBUST)
 // ========================================
 
 function parseTimeline(text) {
-    /**
-     * Parse the AI-generated structured output into organized sections
-     */
     const sections = {
         timeline: {},
         ending: '',
         lostFromPath: [],
-        grassIsGreenScore: 0,
+        grassIsGreenScore: 50,
         explanation: ''
     };
 
-    // Extract timeline years (YEAR 1, YEAR 3, YEAR 5, YEAR 10)
-    const yearRegex = /YEAR\s+(\d+):([\s\S]*?)(?=YEAR|\s+ENDING|$)/gi;
-    let match;
+    // Normalize line endings
+    text = text.replace(/\r\n/g, "\n");
 
-    while ((match = yearRegex.exec(text)) !== null) {
+    // Extract each YEAR block safely
+    const yearMatches = text.matchAll(/YEAR\s+(\d+):([\s\S]*?)(?=YEAR\s+\d+:|ENDING:|WHAT THEY WOULD HAVE LOST|GRASS IS GREENER|$)/gi);
+
+    for (const match of yearMatches) {
         const year = match[1];
-        const content = match[2].trim();
+        const content = match[2];
 
-        // Parse wins and struggles
         const winsMatch = content.match(/Wins:\s*([\s\S]*?)(?=Struggles:|$)/i);
-        const strugglesMatch = content.match(/Struggles:\s*([\s\S]*?)(?=$|YEAR|ENDING)/i);
+        const strugglesMatch = content.match(/Struggles:\s*([\s\S]*)/i);
 
         sections.timeline[`year${year}`] = {
             wins: winsMatch ? winsMatch[1].trim() : '',
@@ -138,57 +113,53 @@ function parseTimeline(text) {
         };
     }
 
-    // Extract ENDING section
-    const endingMatch = text.match(/ENDING:\s*([\s\S]*?)(?=WHAT THEY WOULD HAVE LOST|$)/i);
+    // ENDING
+    const endingMatch = text.match(/ENDING:\s*([\s\S]*?)(?=WHAT THEY WOULD HAVE LOST|GRASS IS GREENER|$)/i);
     if (endingMatch) {
         sections.ending = endingMatch[1].trim();
     }
 
-    // Extract WHAT THEY WOULD HAVE LOST FROM THEIR CURRENT LIFE
+    // LOST SECTION
     const lostMatch = text.match(/WHAT THEY WOULD HAVE LOST FROM THEIR CURRENT LIFE:\s*([\s\S]*?)(?=GRASS IS GREENER|$)/i);
     if (lostMatch) {
-        const lostText = lostMatch[1].trim();
-        sections.lostFromPath = lostText
-            .split('\n')
-            .filter(line => line.trim().startsWith('-'))
-            .map(line => line.replace(/^-\s*/, '').trim());
+        sections.lostFromPath = lostMatch[1]
+            .split("\n")
+            .filter(line => line.trim().startsWith("-"))
+            .map(line => line.replace(/^-\s*/, "").trim());
     }
 
-    // Extract GRASS IS GREENER SCORE
-    const scoreMatch = text.match(/GRASS IS GREENER SCORE:\s*(\d+)([\s\S]*?)$/i);
+    // SCORE
+    const scoreMatch = text.match(/GRASS IS GREENER SCORE:\s*(\d+)/i);
     if (scoreMatch) {
         sections.grassIsGreenScore = parseInt(scoreMatch[1], 10);
-        sections.explanation = scoreMatch[2].trim();
+    }
+
+    // Explanation (everything after score line)
+    const explanationMatch = text.match(/GRASS IS GREENER SCORE:[^\n]*\n?([\s\S]*)$/i);
+    if (explanationMatch) {
+        sections.explanation = explanationMatch[1].trim();
     }
 
     return sections;
 }
+
 
 // ========================================
 // RENDER RESULTS
 // ========================================
 
 function renderResults(rawOutput) {
-    // Parse the structured output
+
     const parsed = parseTimeline(rawOutput);
 
-    // Render current path (baseline)
     renderCurrentPath();
-
-    // Render timeline (pass full parsed data including ending)
     renderTimeline(parsed);
-
-    // Render hidden costs
     renderHiddenCosts(parsed.lostFromPath);
-
-    // Render romanticization meter
     renderMeter(parsed.grassIsGreenScore, parsed.explanation);
 
-    // Switch views
     homepage.classList.remove('active');
     resultsView.classList.add('active');
 
-    // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -197,6 +168,7 @@ function renderResults(rawOutput) {
 // ========================================
 
 function renderCurrentPath() {
+
     const profession = formData.profession || 'your current profession';
     const location = formData.location || 'your current location';
 
@@ -210,11 +182,13 @@ function renderCurrentPath() {
 // ========================================
 
 function renderTimeline(parsedData) {
+
     timelineContainer.innerHTML = '';
 
     const years = [1, 3, 5, 10];
 
-    years.forEach((year, index) => {
+    years.forEach((year) => {
+
         const key = `year${year}`;
         const data = parsedData.timeline[key] || { wins: '', struggles: '' };
 
@@ -230,34 +204,34 @@ function renderTimeline(parsedData) {
                     <div class="timeline-section">
                         <div class="timeline-section-title">✓ Wins</div>
                         <div class="timeline-section-content">${escapeHtml(data.wins)}</div>
-                    </div>
-                ` : ''}
+                    </div>` : ''}
                 
                 ${data.struggles ? `
                     <div class="timeline-section">
                         <div class="timeline-section-title">⚠ Struggles</div>
                         <div class="timeline-section-content">${escapeHtml(data.struggles)}</div>
-                    </div>
-                ` : ''}
+                    </div>` : ''}
             </div>
         `;
 
         timelineContainer.appendChild(card);
     });
 
-    // Add ending card
-    const endingCard = document.createElement('div');
-    endingCard.className = 'timeline-card';
+    // Ending card
+    if (parsedData.ending) {
+        const endingCard = document.createElement('div');
+        endingCard.className = 'timeline-card';
 
-    endingCard.innerHTML = `
-        <div class="timeline-dot"></div>
-        <div class="timeline-card-content">
-            <div class="timeline-card-title">10-Year Perspective</div>
-            <div class="timeline-section-content">${escapeHtml(parsedData.ending || '')}</div>
-        </div>
-    `;
+        endingCard.innerHTML = `
+            <div class="timeline-dot"></div>
+            <div class="timeline-card-content">
+                <div class="timeline-card-title">10-Year Perspective</div>
+                <div class="timeline-section-content">${escapeHtml(parsedData.ending)}</div>
+            </div>
+        `;
 
-    timelineContainer.appendChild(endingCard);
+        timelineContainer.appendChild(endingCard);
+    }
 }
 
 // ========================================
@@ -265,7 +239,8 @@ function renderTimeline(parsedData) {
 // ========================================
 
 function renderHiddenCosts(costs) {
-    if (costs.length === 0) {
+
+    if (!costs || costs.length === 0) {
         hiddenCostsSection.style.display = 'none';
         return;
     }
@@ -281,74 +256,64 @@ function renderHiddenCosts(costs) {
 }
 
 // ========================================
-// RENDER METER (ROMANTICIZATION SCORE)
+// RENDER METER
 // ========================================
 
 function renderMeter(score, explanation) {
-    // Ensure score is valid
-    const normalizedScore = Math.min(100, Math.max(0, score));
 
-    // Animate meter progress
-    const circumference = 2 * Math.PI * 90; // radius = 90
-    const offset = circumference - (normalizedScore / 100) * circumference;
+    const normalizedScore = Math.min(100, Math.max(0, score || 50));
 
+    const circumference = 2 * Math.PI * 90;
     const progressRing = document.getElementById('progressRing');
-    progressRing.style.strokeDasharray = circumference;
-    progressRing.style.strokeDashoffset = offset;
 
-    // Animate from 0 to score
+    progressRing.style.strokeDasharray = circumference;
+
     animateValue(meterValue, 0, normalizedScore, 1000, (value) => {
-        progressRing.style.strokeDashoffset = circumference - (value / 100) * circumference;
+        progressRing.style.strokeDashoffset =
+            circumference - (value / 100) * circumference;
     });
 
-    // Set final value
-    meterValue.textContent = normalizedScore;
-
-    // Display conditional insight
     if (normalizedScore > 70) {
-        meterInsight.textContent = 'Careful. That timeline also includes difficult bosses and missed family moments.';
+        meterInsight.textContent =
+            'Careful. That timeline also includes difficult bosses and missed family moments.';
     } else if (normalizedScore < 40) {
-        meterInsight.textContent = 'Turns out, your current life isn\'t missing much.';
+        meterInsight.textContent =
+            'Turns out, your current life isn’t missing much.';
     } else {
-        meterInsight.textContent = 'Life has trade-offs either way.';
+        meterInsight.textContent =
+            'Life has trade-offs either way.';
     }
 
-    // Display explanation
-    insightText.textContent = explanation;
+    insightText.textContent = explanation || '';
 }
 
 // ========================================
-// ANIMATE VALUE (FOR METER)
+// ANIMATION
 // ========================================
 
 function animateValue(element, start, end, duration, callback) {
+
     const startTime = Date.now();
 
-    const updateValue = () => {
+    const update = () => {
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        const current = Math.floor(start + (end - start) * easeOutQuad(progress));
+        const current = Math.floor(start + (end - start) * (1 - (1 - progress) * (1 - progress)));
 
-        if (callback) {
-            callback(current);
-        } else {
-            element.textContent = current;
-        }
+        callback(current);
 
         if (progress < 1) {
-            requestAnimationFrame(updateValue);
+            requestAnimationFrame(update);
+        } else {
+            element.textContent = end;
         }
     };
 
-    updateValue();
-}
-
-function easeOutQuad(t) {
-    return 1 - (1 - t) * (1 - t);
+    update();
 }
 
 // ========================================
-// GO BACK TO FORM
+// GO BACK
 // ========================================
 
 function goBackToForm() {
@@ -360,10 +325,11 @@ function goBackToForm() {
 }
 
 // ========================================
-// UTILITY: ESCAPE HTML
+// ESCAPE HTML
 // ========================================
 
 function escapeHtml(unsafe) {
+    if (!unsafe) return '';
     return unsafe
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -372,8 +338,4 @@ function escapeHtml(unsafe) {
         .replace(/'/g, '&#039;');
 }
 
-// ========================================
-// INITIALIZE
-// ========================================
-
-console.log('Forked – Butterfly Effect: Trade-off Simulator loaded');
+console.log('Forked – Butterfly Effect loaded successfully');

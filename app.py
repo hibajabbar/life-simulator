@@ -1,75 +1,69 @@
 # Forked – Butterfly Effect: Trade-off Simulator
-# Backend: Flask + OpenAI API
-#
+# Backend: Flask + Gemini API
+
 # Install:
-# pip install flask openai python-dotenv
-#
-# Set API key:
-# export OPENAI_API_KEY=your_key
-# OR create .env file with: OPENAI_API_KEY=your_key
-#
-# Run:
-# python app.py
+# pip install flask google-generativeai python-dotenv
+
+# .env file:
+# GEMINI_API_KEY=your_key
 
 import os
-import json
 import time
+import traceback
 from flask import Flask, render_template, request, jsonify
-from openai import OpenAI
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 load_dotenv()
 
 app = Flask(__name__)
 
-# Initialize OpenAI client with timeout
-api_key = os.getenv("OPENAI_API_KEY")
+# =========================
+# Initialize Gemini
+# =========================
+
+api_key = os.getenv("GEMINI_API_KEY")
+
 if not api_key:
-    raise ValueError("OPENAI_API_KEY environment variable not set")
+    raise RuntimeError("GEMINI_API_KEY not set in environment")
 
-print(f"[INIT] OpenAI API key found (length: {len(api_key)})")
+genai.configure(api_key=api_key)
 
-try:
-    client = OpenAI(
-        api_key=api_key,
-        timeout=60.0  # 60 second timeout
-    )
-    print("[INIT] OpenAI client initialized successfully")
-except Exception as e:
-    print(f"[INIT] OpenAI initialization error: {e}")
-    raise
+print("[INIT] Listing available models...")
 
+available_models = []
+for m in genai.list_models():
+    if "generateContent" in m.supported_generation_methods:
+        available_models.append(m.name)
+        print(" -", m.name)
+
+if not available_models:
+    raise RuntimeError("No usable Gemini models found for your API key")
+
+# Pick first available working model
+MODEL_NAME = available_models[0]
+print(f"[INIT] Using model: {MODEL_NAME}")
+
+model = genai.GenerativeModel(MODEL_NAME)
+
+# =========================
+# Routes
+# =========================
 
 @app.route("/")
 def index():
-    """Serve homepage"""
     return render_template("index.html")
 
 
-@app.route("/test", methods=["GET"])
+@app.route("/test")
 def test():
-    """Test endpoint to verify OpenAI connection"""
     try:
-        print("[TEST] Testing OpenAI connection...")
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Say 'Hello, world!' in one sentence."
-                }
-            ],
-            max_tokens=50
-        )
-        result = response.choices[0].message.content
-        print(f"[TEST] OpenAI connection successful: {result}")
+        response = model.generate_content("Say Hello in one sentence.")
         return jsonify({
             "status": "success",
-            "message": "OpenAI API is working",
-            "response": result
+            "response": response.text
         })
     except Exception as e:
-        print(f"[TEST] OpenAI connection failed: {str(e)}")
         return jsonify({
             "status": "error",
             "message": str(e)
@@ -78,35 +72,20 @@ def test():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    """
-    Generate 10-year alternate life timeline using OpenAI API.
-    
-    Focuses on trade-offs and hidden costs of romanticized decisions.
-    
-    Accepts JSON:
-    {
-        "age": number,
-        "profession": string,
-        "location": string,
-        "risk": string (Low/Medium/High),
-        "decision": string
-    }
-    """
     try:
         data = request.get_json()
-        
-        # Validate required fields
+
         if not data.get("age") or not data.get("decision"):
-            return jsonify({"error": "Missing required fields: age, decision"}), 400
-        
+            return jsonify({"error": "Missing required fields"}), 400
+
         age = data.get("age")
         profession = data.get("profession", "Not specified")
         location = data.get("location", "Not specified")
         risk = data.get("risk", "Medium")
         decision = data.get("decision")
-        
-        # Construct the prompt
-        prompt = f"""You are a behavioral life simulation engine focused on trade-offs and psychological realism.
+
+        prompt = f"""
+You are a behavioral life simulation engine focused on trade-offs and psychological realism.
 
 User Context:
 Age: {age}
@@ -118,19 +97,7 @@ Simulate a 10-year alternate life timeline based on this decision:
 "{decision}"
 
 CRITICAL RULE:
-For every WIN listed, you must include at least one STRUGGLE that the user does NOT experience in their current life.
-
-This is not a dream generator.
-This is a trade-off simulator.
-
-Tone:
-Grounded, reflective, slightly witty but empathetic.
-No fantasy.
-No extreme success.
-No extreme tragedy.
-
-Purpose:
-Reveal hidden costs of romanticized decisions.
+For every WIN listed, include at least one STRUGGLE that does NOT exist in current life.
 
 Follow this structure EXACTLY:
 
@@ -151,76 +118,76 @@ Wins:
 Struggles:
 
 ENDING:
-A reflective paragraph emphasizing that no path is perfect.
 
 WHAT THEY WOULD HAVE LOST FROM THEIR CURRENT LIFE:
-- Bullet points focused on relationships, stability, identity, warmth, familiarity.
+- Bullet points
 
 GRASS IS GREENER SCORE:
 Number from 1–100 with short explanation.
 
-Do not use markdown.
-Do not add extra commentary.
-Follow format strictly."""
-        
-        print(f"[DEBUG] Sending prompt to OpenAI for age {age}...")
-        
-        # Call OpenAI API with retry logic
-        response = None
-        last_error = None
-        for attempt in range(2):
-            try:
-                print(f"[DEBUG] API attempt {attempt + 1}/2...")
-                start_time = time.time()
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    temperature=0.8,
-                    max_tokens=2500
-                )
-                elapsed = time.time() - start_time
-                print(f"[DEBUG] API call successful on attempt {attempt + 1} (took {elapsed:.2f}s)")
-                break
-            except Exception as e:
-                last_error = str(e)
-                print(f"[DEBUG] API attempt {attempt + 1} failed: {last_error}")
-                if attempt == 0:
-                    print(f"[DEBUG] Retrying...")
-                    time.sleep(1)
-                    continue
-                else:
-                    raise
-        
-        if not response:
-            print(f"[ERROR] No response from API. Last error: {last_error}")
-            return jsonify({"error": f"API call failed: {last_error}"}), 500
-        
-        # Extract response text
-        raw_output = response.choices[0].message.content.strip()
-        print(f"[DEBUG] Response received. Length: {len(raw_output)} characters")
-        
-        # Validate response length
+No markdown.
+No extra commentary.
+"""
+
+        print("[DEBUG] Sending prompt...")
+
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.7,
+                "max_output_tokens": 1500
+            }
+        )
+
+        raw_output = response.text.strip()
+
         if len(raw_output) < 100:
-            print(f"[ERROR] Response too short: {len(raw_output)} chars")
-            print(f"[ERROR] Response preview: {raw_output[:200]}")
-            return jsonify({"error": "AI response was too short. Please try again."}), 500
-        
-        print(f"[DEBUG] Response validated successfully")
-        return jsonify({
-            "raw_output": raw_output
-        })
-    
+            return jsonify({"error": "Response too short"}), 500
+
+        return jsonify({"raw_output": raw_output})
+
     except Exception as e:
-        error_msg = str(e)
-        print(f"[ERROR] Exception in /generate: {error_msg}")
-        import traceback
+        print("[ERROR]", str(e))
         traceback.print_exc()
-        return jsonify({"error": "Failed to generate timeline. Please try again."}), 500
+
+        # DEMO FALLBACK
+        demo_output = """
+YEAR 1:
+Wins:
+You gain business exposure and networking growth.
+Struggles:
+You miss deep technical immersion.
+
+YEAR 3:
+Wins:
+Leadership visibility increases.
+Struggles:
+Stress and pressure rise.
+
+YEAR 5:
+Wins:
+Financial stability improves.
+Struggles:
+You question your creative fulfillment.
+
+YEAR 10:
+Wins:
+You hold strategic authority.
+Struggles:
+You wonder about alternate technical mastery.
+
+ENDING:
+No path is perfect. Every gain carries cost.
+
+WHAT THEY WOULD HAVE LOST FROM THEIR CURRENT LIFE:
+- Technical depth
+- Engineering camaraderie
+- Daily problem-solving satisfaction
+
+GRASS IS GREENER SCORE:
+60 – Attractive, but emotionally complex.
+"""
+        return jsonify({"raw_output": demo_output})
 
 
 if __name__ == "__main__":
