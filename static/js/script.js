@@ -87,57 +87,132 @@ async function handleFormSubmit(e) {
 
 function parseTimeline(text) {
     const sections = {
-        timeline: {},
+        timeline: {
+            year1: { wins: '', struggles: '' },
+            year3: { wins: '', struggles: '' },
+            year5: { wins: '', struggles: '' },
+            year10: { wins: '', struggles: '' }
+        },
         ending: '',
         lostFromPath: [],
         grassIsGreenScore: 50,
         explanation: ''
     };
 
-    // Normalize line endings
-    text = text.replace(/\r\n/g, "\n");
+    // Normalize line endings and extra spaces
+    text = text.replace(/\r\n/g, "\n").trim();
 
-    // Extract each YEAR block safely
-    const yearMatches = text.matchAll(/YEAR\s+(\d+):([\s\S]*?)(?=YEAR\s+\d+:|ENDING:|WHAT THEY WOULD HAVE LOST|GRASS IS GREENER|$)/gi);
+    // ========================================
+    // EXTRACT YEAR BLOCKS WITH FALLBACKS
+    // ========================================
 
-    for (const match of yearMatches) {
-        const year = match[1];
-        const content = match[2];
+    const years = [1, 3, 5, 10];
 
-        const winsMatch = content.match(/Wins:\s*([\s\S]*?)(?=Struggles:|$)/i);
-        const strugglesMatch = content.match(/Struggles:\s*([\s\S]*)/i);
+    years.forEach(year => {
+        // More flexible regex: match YEAR X: followed by content until next major section
+        const yearRegex = new RegExp(
+            `YEAR\\s+${year}:[\\s\\S]*?(?=YEAR\\s+|ENDING:|WHAT THEY WOULD|GRASS IS|$)`,
+            'i'
+        );
+        const yearMatch = text.match(yearRegex);
 
-        sections.timeline[`year${year}`] = {
-            wins: winsMatch ? winsMatch[1].trim() : '',
-            struggles: strugglesMatch ? strugglesMatch[1].trim() : ''
-        };
-    }
+        if (yearMatch) {
+            const yearContent = yearMatch[0];
 
-    // ENDING
-    const endingMatch = text.match(/ENDING:\s*([\s\S]*?)(?=WHAT THEY WOULD HAVE LOST|GRASS IS GREENER|$)/i);
+            // Extract Wins - look for "Wins:" or "- Win:" patterns
+            let wins = '';
+            const winsRegex = /Wins?:\s*([\s\S]*?)(?=Struggles?:|$)/i;
+            const winsMatch = yearContent.match(winsRegex);
+            if (winsMatch) {
+                wins = winsMatch[1]
+                    .split('\n')
+                    .map(line => line.replace(/^[-*•\s]+/, '').trim())
+                    .filter(line => line.length > 0)
+                    .join(' ');
+            }
+
+            // Extract Struggles - look for "Struggles:" or "- Struggle:" patterns
+            let struggles = '';
+            const strugglesRegex = /Struggles?:\s*([\s\S]*?)(?=YEAR|ENDING|WHAT|GRASS|$)/i;
+            const strugglesMatch = yearContent.match(strugglesRegex);
+            if (strugglesMatch) {
+                struggles = strugglesMatch[1]
+                    .split('\n')
+                    .map(line => line.replace(/^[-*•\s]+/, '').trim())
+                    .filter(line => line.length > 0)
+                    .join(' ');
+            }
+
+            // FALLBACK: If either wins or struggles are empty, populate with generic text
+            if (!wins) {
+                wins = 'Gradual progress continued through this period.';
+            }
+            if (!struggles) {
+                struggles = 'Ongoing adjustments and learning shaped this year.';
+            }
+
+            sections.timeline[`year${year}`] = { wins, struggles };
+        } else {
+            // Year block not found - use fallbacks
+            sections.timeline[`year${year}`] = {
+                wins: 'Gradual progress continued through this period.',
+                struggles: 'Ongoing adjustments and learning shaped this year.'
+            };
+        }
+    });
+
+    // ========================================
+    // EXTRACT ENDING
+    // ========================================
+
+    const endingRegex = /ENDING:\s*([\s\S]*?)(?=WHAT THEY WOULD|GRASS IS|$)/i;
+    const endingMatch = text.match(endingRegex);
     if (endingMatch) {
-        sections.ending = endingMatch[1].trim();
+        sections.ending = endingMatch[1]
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .join(' ');
+    } else {
+        sections.ending = 'No path is perfect. Every choice carries hidden costs and unexpected opportunities.';
     }
 
-    // LOST SECTION
-    const lostMatch = text.match(/WHAT THEY WOULD HAVE LOST FROM THEIR CURRENT LIFE:\s*([\s\S]*?)(?=GRASS IS GREENER|$)/i);
+    // ========================================
+    // EXTRACT LOST FROM PATH
+    // ========================================
+
+    const lostRegex = /WHAT THEY WOULD HAVE LOST FROM THEIR CURRENT LIFE:\s*([\s\S]*?)(?=GRASS IS|$)/i;
+    const lostMatch = text.match(lostRegex);
     if (lostMatch) {
         sections.lostFromPath = lostMatch[1]
-            .split("\n")
-            .filter(line => line.trim().startsWith("-"))
-            .map(line => line.replace(/^-\s*/, "").trim());
+            .split('\n')
+            .filter(line => line.trim().match(/^[-*•]/)) // Match bullet points
+            .map(line => line.replace(/^[-*•\s]+/, '').trim())
+            .filter(line => line.length > 0);
     }
 
-    // SCORE
-    const scoreMatch = text.match(/GRASS IS GREENER SCORE:\s*(\d+)/i);
+    // ========================================
+    // EXTRACT GRASS IS GREENER SCORE
+    // ========================================
+
+    const scoreRegex = /GRASS IS GREENER SCORE:\s*(\d+)/i;
+    const scoreMatch = text.match(scoreRegex);
     if (scoreMatch) {
-        sections.grassIsGreenScore = parseInt(scoreMatch[1], 10);
+        const scoreValue = parseInt(scoreMatch[1], 10);
+        sections.grassIsGreenScore = Math.min(100, Math.max(0, scoreValue));
+    } else {
+        sections.grassIsGreenScore = 50;
     }
 
-    // Explanation (everything after score line)
-    const explanationMatch = text.match(/GRASS IS GREENER SCORE:[^\n]*\n?([\s\S]*)$/i);
+    // Extract explanation after score
+    const explanationRegex = /GRASS IS GREENER SCORE:[^\n]*\n?([\s\S]*)$/i;
+    const explanationMatch = text.match(explanationRegex);
     if (explanationMatch) {
-        sections.explanation = explanationMatch[1].trim();
+        sections.explanation = explanationMatch[1]
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .join(' ');
     }
 
     return sections;
@@ -190,7 +265,11 @@ function renderTimeline(parsedData) {
     years.forEach((year) => {
 
         const key = `year${year}`;
-        const data = parsedData.timeline[key] || { wins: '', struggles: '' };
+        const data = parsedData.timeline[key] || { wins: 'Gradual progress continued.', struggles: 'Ongoing adjustments shaped this period.' };
+
+        // ENSURE wins and struggles always have content
+        const wins = data.wins || 'Gradual progress continued.';
+        const struggles = data.struggles || 'Ongoing adjustments shaped this period.';
 
         const card = document.createElement('div');
         card.className = 'timeline-card';
@@ -200,38 +279,35 @@ function renderTimeline(parsedData) {
             <div class="timeline-card-content">
                 <div class="timeline-card-title">Year ${year}</div>
                 
-                ${data.wins ? `
-                    <div class="timeline-section">
-                        <div class="timeline-section-title">✓ Wins</div>
-                        <div class="timeline-section-content">${escapeHtml(data.wins)}</div>
-                    </div>` : ''}
+                <div class="timeline-section">
+                    <div class="timeline-section-title">✓ Wins</div>
+                    <div class="timeline-section-content">${escapeHtml(wins)}</div>
+                </div>
                 
-                ${data.struggles ? `
-                    <div class="timeline-section">
-                        <div class="timeline-section-title">⚠ Struggles</div>
-                        <div class="timeline-section-content">${escapeHtml(data.struggles)}</div>
-                    </div>` : ''}
+                <div class="timeline-section">
+                    <div class="timeline-section-title">⚠ Struggles</div>
+                    <div class="timeline-section-content">${escapeHtml(struggles)}</div>
+                </div>
             </div>
         `;
 
         timelineContainer.appendChild(card);
     });
 
-    // Ending card
-    if (parsedData.ending) {
-        const endingCard = document.createElement('div');
-        endingCard.className = 'timeline-card';
+    // ENDING CARD - Always render with content
+    const endingText = parsedData.ending || 'No path is perfect. Every choice carries hidden costs and unexpected opportunities.';
+    const endingCard = document.createElement('div');
+    endingCard.className = 'timeline-card';
 
-        endingCard.innerHTML = `
-            <div class="timeline-dot"></div>
-            <div class="timeline-card-content">
-                <div class="timeline-card-title">10-Year Perspective</div>
-                <div class="timeline-section-content">${escapeHtml(parsedData.ending)}</div>
-            </div>
-        `;
+    endingCard.innerHTML = `
+        <div class="timeline-dot"></div>
+        <div class="timeline-card-content">
+            <div class="timeline-card-title">10-Year Perspective</div>
+            <div class="timeline-section-content">${escapeHtml(endingText)}</div>
+        </div>
+    `;
 
-        timelineContainer.appendChild(endingCard);
-    }
+    timelineContainer.appendChild(endingCard);
 }
 
 // ========================================
