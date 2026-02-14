@@ -82,7 +82,7 @@ async function handleFormSubmit(e) {
 }
 
 // ========================================
-// PARSE STRUCTURED OUTPUT (ROBUST)
+// PARSE STRUCTURED OUTPUT (INDEX-BASED)
 // ========================================
 
 function parseTimeline(text) {
@@ -99,123 +99,187 @@ function parseTimeline(text) {
         explanation: ''
     };
 
-    // Normalize line endings and extra spaces
+    // Normalize line endings
     text = text.replace(/\r\n/g, "\n").trim();
 
     // ========================================
-    // EXTRACT YEAR BLOCKS WITH FALLBACKS
+    // STEP 1: FIND ALL YEAR MARKERS WITH POSITIONS
     // ========================================
 
+    const yearPositions = {};
     const years = [1, 3, 5, 10];
+    let majorSectionStart = -1;
 
     years.forEach(year => {
-        // More flexible regex: match YEAR X: followed by content until next major section
-        const yearRegex = new RegExp(
-            `YEAR\\s+${year}:[\\s\\S]*?(?=YEAR\\s+|ENDING:|WHAT THEY WOULD|GRASS IS|$)`,
-            'i'
-        );
-        const yearMatch = text.match(yearRegex);
-
-        if (yearMatch) {
-            const yearContent = yearMatch[0];
-
-            // Extract Wins - look for "Wins:" or "- Win:" patterns
-            let wins = '';
-            const winsRegex = /Wins?:\s*([\s\S]*?)(?=Struggles?:|$)/i;
-            const winsMatch = yearContent.match(winsRegex);
-            if (winsMatch) {
-                wins = winsMatch[1]
-                    .split('\n')
-                    .map(line => line.replace(/^[-*•\s]+/, '').trim())
-                    .filter(line => line.length > 0)
-                    .join(' ');
-            }
-
-            // Extract Struggles - look for "Struggles:" or "- Struggle:" patterns
-            let struggles = '';
-            const strugglesRegex = /Struggles?:\s*([\s\S]*?)(?=YEAR|ENDING|WHAT|GRASS|$)/i;
-            const strugglesMatch = yearContent.match(strugglesRegex);
-            if (strugglesMatch) {
-                struggles = strugglesMatch[1]
-                    .split('\n')
-                    .map(line => line.replace(/^[-*•\s]+/, '').trim())
-                    .filter(line => line.length > 0)
-                    .join(' ');
-            }
-
-            // FALLBACK: If either wins or struggles are empty, populate with generic text
-            if (!wins) {
-                wins = 'Gradual progress continued through this period.';
-            }
-            if (!struggles) {
-                struggles = 'Ongoing adjustments and learning shaped this year.';
-            }
-
-            sections.timeline[`year${year}`] = { wins, struggles };
+        // Find "YEAR X:" (case-insensitive)
+        const yearPattern = new RegExp(`YEAR\\s+${year}:`, 'i');
+        const match = yearPattern.exec(text);
+        if (match) {
+            yearPositions[year] = match.index;
+            console.log(`[PARSE] Year ${year} found at index ${match.index}`);
         } else {
-            // Year block not found - use fallbacks
-            sections.timeline[`year${year}`] = {
-                wins: 'Gradual progress continued through this period.',
-                struggles: 'Ongoing adjustments and learning shaped this year.'
-            };
+            console.log(`[PARSE] Year ${year} NOT found in text`);
         }
+    });
+
+    // Find major section markers (ENDING, WHAT THEY WOULD, GRASS IS)
+    const endingMatch = /ENDING:/i.exec(text);
+    const lostMatch = /WHAT THEY WOULD/i.exec(text);
+    const scoreMatch = /GRASS IS GREENER SCORE:/i.exec(text);
+
+    if (endingMatch) majorSectionStart = endingMatch.index;
+    if (lostMatch && lostMatch.index < majorSectionStart) majorSectionStart = lostMatch.index;
+    if (scoreMatch && scoreMatch.index < majorSectionStart) majorSectionStart = scoreMatch.index;
+
+    console.log(`[PARSE] Major section starts at index: ${majorSectionStart}`);
+
+    // ========================================
+    // STEP 2: EXTRACT EACH YEAR BLOCK
+    // ========================================
+
+    years.forEach(year => {
+        if (!(year in yearPositions)) {
+            console.log(`[PARSE] Skipping year ${year} - not found`);
+            return;
+        }
+
+        const yearIndex = yearPositions[year];
+
+        // Find the end of this year's block
+        let yearEnd = text.length;
+
+        // Check what comes next
+        const nextYears = years.filter(y => y > year && y in yearPositions);
+        if (nextYears.length > 0) {
+            // There's another year after this one
+            const nextYearIndex = Math.min(...nextYears.map(y => yearPositions[y]));
+            yearEnd = nextYearIndex;
+        } else if (majorSectionStart > yearIndex) {
+            // This is the last year, cut at major section
+            yearEnd = majorSectionStart;
+        }
+
+        // Extract the year block substring
+        const yearBlock = text.substring(yearIndex, yearEnd);
+        console.log(`[PARSE] Year ${year} block length: ${yearBlock.length}`);
+
+        // ========================================
+        // STEP 3: EXTRACT WINS AND STRUGGLES USING INDEX-BASED SLICING
+        // ========================================
+
+        let wins = '';
+        let struggles = '';
+
+        // Find "Wins:" within this block
+        const winsIndex = yearBlock.search(/Wins?:/i);
+        if (winsIndex !== -1) {
+            // Find where wins content ends (either at "Struggles:" or end of block)
+            const strugglesIndex = yearBlock.search(/Struggles?:/i);
+            const winsEnd = strugglesIndex !== -1 ? strugglesIndex : yearBlock.length;
+
+            // Extract wins text
+            const winsRaw = yearBlock.substring(winsIndex + 6, winsEnd);
+            wins = cleanContent(winsRaw);
+            console.log(`[PARSE] Year ${year} wins extracted: ${wins.substring(0, 50)}...`);
+        }
+
+        // Find "Struggles:" within this block
+        const strugglesIndex = yearBlock.search(/Struggles?:/i);
+        if (strugglesIndex !== -1) {
+            // Struggles content goes until end of block
+            const strugglesRaw = yearBlock.substring(strugglesIndex + 10);
+            struggles = cleanContent(strugglesRaw);
+            console.log(`[PARSE] Year ${year} struggles extracted: ${struggles.substring(0, 50)}...`);
+        }
+
+        // ========================================
+        // STEP 4: APPLY FALLBACK ONLY IF EXTRACTION FAILED
+        // ========================================
+
+        if (!wins || wins.length === 0) {
+            console.log(`[PARSE] Year ${year} wins EMPTY - applying fallback`);
+            wins = 'Gradual progress continued through this period.';
+        }
+
+        if (!struggles || struggles.length === 0) {
+            console.log(`[PARSE] Year ${year} struggles EMPTY - applying fallback`);
+            struggles = 'Ongoing adjustments and learning shaped this year.';
+        }
+
+        // Store extracted content
+        sections.timeline[`year${year}`] = { wins, struggles };
+        console.log(`[PARSE] Year ${year} stored successfully`);
     });
 
     // ========================================
     // EXTRACT ENDING
     // ========================================
 
-    const endingRegex = /ENDING:\s*([\s\S]*?)(?=WHAT THEY WOULD|GRASS IS|$)/i;
-    const endingMatch = text.match(endingRegex);
     if (endingMatch) {
-        sections.ending = endingMatch[1]
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 0)
-            .join(' ');
+        const endingStart = endingMatch.index + endingMatch[0].length;
+        const endingEnd = lostMatch ? lostMatch.index : scoreMatch ? scoreMatch.index : text.length;
+        const endingRaw = text.substring(endingStart, endingEnd);
+        sections.ending = cleanContent(endingRaw);
+        console.log(`[PARSE] Ending extracted: ${sections.ending.substring(0, 50)}...`);
     } else {
         sections.ending = 'No path is perfect. Every choice carries hidden costs and unexpected opportunities.';
+        console.log(`[PARSE] Ending not found - using fallback`);
     }
 
     // ========================================
     // EXTRACT LOST FROM PATH
     // ========================================
 
-    const lostRegex = /WHAT THEY WOULD HAVE LOST FROM THEIR CURRENT LIFE:\s*([\s\S]*?)(?=GRASS IS|$)/i;
-    const lostMatch = text.match(lostRegex);
     if (lostMatch) {
-        sections.lostFromPath = lostMatch[1]
+        const lostStart = lostMatch.index + lostMatch[0].length;
+        const lostEnd = scoreMatch ? scoreMatch.index : text.length;
+        const lostRaw = text.substring(lostStart, lostEnd);
+
+        sections.lostFromPath = lostRaw
             .split('\n')
-            .filter(line => line.trim().match(/^[-*•]/)) // Match bullet points
-            .map(line => line.replace(/^[-*•\s]+/, '').trim())
+            .filter(line => line.trim().match(/^[-*•]/))
+            .map(line => cleanContent(line.replace(/^[-*•\s]+/, '')))
             .filter(line => line.length > 0);
+
+        console.log(`[PARSE] Lost items extracted: ${sections.lostFromPath.length} items`);
     }
 
     // ========================================
     // EXTRACT GRASS IS GREENER SCORE
     // ========================================
 
-    const scoreRegex = /GRASS IS GREENER SCORE:\s*(\d+)/i;
-    const scoreMatch = text.match(scoreRegex);
     if (scoreMatch) {
-        const scoreValue = parseInt(scoreMatch[1], 10);
-        sections.grassIsGreenScore = Math.min(100, Math.max(0, scoreValue));
-    } else {
-        sections.grassIsGreenScore = 50;
-    }
+        const scoreStart = scoreMatch.index + scoreMatch[0].length;
+        const scoreRaw = text.substring(scoreStart, Math.min(scoreStart + 50, text.length));
+        const scoreNumberMatch = scoreRaw.match(/(\d+)/);
 
-    // Extract explanation after score
-    const explanationRegex = /GRASS IS GREENER SCORE:[^\n]*\n?([\s\S]*)$/i;
-    const explanationMatch = text.match(explanationRegex);
-    if (explanationMatch) {
-        sections.explanation = explanationMatch[1]
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 0)
-            .join(' ');
+        if (scoreNumberMatch) {
+            const scoreValue = parseInt(scoreNumberMatch[1], 10);
+            sections.grassIsGreenScore = Math.min(100, Math.max(0, scoreValue));
+            console.log(`[PARSE] Score extracted: ${sections.grassIsGreenScore}`);
+        }
+
+        // Extract explanation after score
+        const explanationStart = scoreStart + scoreRaw.indexOf(scoreNumberMatch[0]) + scoreNumberMatch[0].length;
+        const explanationRaw = text.substring(explanationStart);
+        sections.explanation = cleanContent(explanationRaw);
+        console.log(`[PARSE] Explanation extracted: ${sections.explanation.substring(0, 50)}...`);
     }
 
     return sections;
+}
+
+// ========================================
+// HELPER: CLEAN CONTENT
+// ========================================
+
+function cleanContent(raw) {
+    return raw
+        .split('\n')
+        .map(line => line.replace(/^[-*•\s]+/, '').trim())
+        .filter(line => line.length > 0)
+        .join(' ')
+        .trim();
 }
 
 
